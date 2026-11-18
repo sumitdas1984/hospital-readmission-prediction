@@ -1,0 +1,24 @@
+[project]
+name = "hospital-readmission-prediction"
+version = "0.1.0"
+description = "End-to-end ML solution for predicting 30-day hospital readmission risk."
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi",
+    "joblib",
+    "numpy",
+    "pandas",
+    "pydantic",
+    "scikit-learn",
+    "streamlit",
+    "uvicorn[standard]",
+]
+
+[dependency-groups]
+dev = [
+    "pytest",
+]
+
+[tool.uv]
+package = false
