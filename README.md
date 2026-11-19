@@ -116,10 +116,19 @@ See [`docs/data-generation-spec.md`](docs/data-generation-spec.md) for the agree
 All data is synthetic. It is not suitable for clinical use.
 
 
-## Phase 4 evaluation package
+## Evaluation package
 
 Run from the repository root:
 ```bash
 uv run python code/evaluate.py
 ```
 Prerequisites: Phase 3 model artifacts, temporal splits, and `code/feature_config.py` must already be present. The script reads only `data/processed/internal_test.csv`; it does not access the 2024 holdout.
+
+
+## Holdout Prediction Generation
+
+Run from repository root:
+```bash
+uv run python code/generate_predictions.py
+```
+The project must already contain `data/raw/train.csv` and `data/raw/holdout.csv` and the required approved dependencies (`pandas`, `scikit-learn`, `joblib`). Do not add `readmitted_30d` to holdout.

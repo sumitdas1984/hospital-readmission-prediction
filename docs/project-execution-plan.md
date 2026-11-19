@@ -212,8 +212,8 @@ Avoid jumping ahead or expanding scope while a phase is still being validated. I
 | 1 | Synthetic Data Design and Generation | Complete |
 | 2 | Data Audit and Validation | Complete |
 | 3 | Baseline and Stronger Model Development | Complete |
-| 4 | Model Evaluation and Calibration | **Complete** |
-| 5 | Holdout Prediction Generation | Next |
-| 6 | Backend Development | Pending |
+| 4 | Model Evaluation and Calibration | Complete |
+| 5 | Holdout Prediction Generation | **Complete** |
+| 6 | Backend Development | Next |
 | 7 | Frontend Development | Pending |
 | 8 | Documentation and Final Submission | Pending |

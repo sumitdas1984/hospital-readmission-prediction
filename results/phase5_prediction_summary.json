@@ -1,0 +1,52 @@
+{
+  "selected_model": "Logistic Regression",
+  "training_rows": 60000,
+  "training_prevalence": 0.1528,
+  "holdout_rows_scored": 8000,
+  "holdout_labels_accessed": false,
+  "prediction_columns": [
+    "admission_id",
+    "risk_score"
+  ],
+  "prediction_row_count": 8000,
+  "unique_admission_ids": 8000,
+  "risk_score_min": 0.011705182124856956,
+  "risk_score_max": 0.7699545673684534,
+  "risk_score_mean": 0.12539534059837418,
+  "fit_seconds": 0.23,
+  "model_parameters": {
+    "C": 1.0,
+    "max_iter": 1000,
+    "random_state": 42
+  },
+  "features": [
+    "age",
+    "comorbidity_count",
+    "los_days",
+    "n_prior_admissions_12m",
+    "n_ed_visits_6m",
+    "num_medications",
+    "bmi",
+    "lab_creatinine_last",
+    "lab_sodium_last",
+    "lab_hemoglobin_last",
+    "systolic_bp_last",
+    "heart_rate_last",
+    "weekend_discharge",
+    "followup_visit_scheduled",
+    "hospital_site",
+    "sex",
+    "insurance_type",
+    "admission_source",
+    "primary_dx_group",
+    "discharge_disposition"
+  ],
+  "excluded_features": [
+    "admission_id",
+    "patient_id",
+    "admit_date",
+    "discharge_date",
+    "post_discharge_call_logged",
+    "readmitted_30d"
+  ]
+}
