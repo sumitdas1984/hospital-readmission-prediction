@@ -114,3 +114,12 @@ uv run python synthetic_data_generator/generate.py
 See [`docs/data-generation-spec.md`](docs/data-generation-spec.md) for the agreed assumptions, feature timing, leakage controls, missingness, and target-generation approach.
 
 All data is synthetic. It is not suitable for clinical use.
+
+
+## Phase 4 evaluation package
+
+Run from the repository root:
+```bash
+uv run python code/evaluate.py
+```
+Prerequisites: Phase 3 model artifacts, temporal splits, and `code/feature_config.py` must already be present. The script reads only `data/processed/internal_test.csv`; it does not access the 2024 holdout.
