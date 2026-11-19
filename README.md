@@ -83,3 +83,34 @@ Data generation, model training, evaluation, and prediction commands will
 be documented here as they are implemented. Check the assignment's
 submission requirements before deciding which generated data and model
 artifacts must be included in the final repository.
+
+## Generate the datasets
+
+From the repository root:
+
+```bash
+python synthetic_data_generator/generate.py
+```
+
+The generator requires `numpy` and `pandas` and uses random seed `42`.
+
+Outputs:
+- `data/raw/train.csv` — 60,000 rows, 26 columns, includes `readmitted_30d`.
+- `data/raw/holdout.csv` — 8,000 rows, 25 columns, excludes `readmitted_30d`.
+
+The generator overwrites these two files when run. Do not add labels to the holdout CSV or use internal holdout diagnostics for model selection.
+
+### Environment
+
+If using the project's `uv` setup:
+
+```bash
+uv sync
+uv run python synthetic_data_generator/generate.py
+```
+
+### Key design decisions
+
+See [`docs/data-generation-spec.md`](docs/data-generation-spec.md) for the agreed assumptions, feature timing, leakage controls, missingness, and target-generation approach.
+
+All data is synthetic. It is not suitable for clinical use.
