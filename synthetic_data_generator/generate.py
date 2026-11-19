@@ -1,18 +1,13 @@
-"""
-Generate synthetic hospital readmission datasets for the Lakeshore assignment.
+"""Generate the assignment's synthetic hospital readmission datasets.
 
-Usage:
+Run from the repository root:
     python synthetic_data_generator/generate.py
-
-Dependencies: numpy, pandas
-Random seed: 42
-Outputs:
-    data/raw/train.csv   (60,000 rows; 26 columns)
-    data/raw/holdout.csv (8,000 rows; 25 columns; no target column)
 """
 from __future__ import annotations
 
+from datetime import date, timedelta
 from pathlib import Path
+
 import numpy as np
 import pandas as pd
 
@@ -20,289 +15,321 @@ SEED = 42
 N_TRAIN = 60_000
 N_HOLDOUT = 8_000
 ROOT = Path(__file__).resolve().parents[1]
-RAW_DIR = ROOT / "data" / "raw"
+OUT = ROOT / "data" / "raw"
 
-COLUMNS = [
-    "admission_id", "patient_id", "hospital_site", "admit_date",
-    "discharge_date", "age", "sex", "insurance_type", "admission_source",
-    "primary_dx_group", "comorbidity_count", "los_days",
-    "n_prior_admissions_12m", "n_ed_visits_6m", "num_medications", "bmi",
-    "lab_creatinine_last", "lab_sodium_last", "lab_hemoglobin_last",
-    "systolic_bp_last", "heart_rate_last", "discharge_disposition",
-    "weekend_discharge", "followup_visit_scheduled",
+SITES = [f"Site_{i}" for i in range(1, 7)]
+SITE_P = [0.25, 0.20, 0.18, 0.15, 0.12, 0.10]
+DIAGNOSES = [
+    "Cardiovascular", "Respiratory", "Endocrine / Diabetes", "Renal",
+    "Gastrointestinal", "Neurological", "Musculoskeletal",
+    "Infectious Diseases", "Oncology", "Mental Health", "Hematology", "Other",
+]
+DIAG_P = [0.15, 0.12, 0.12, 0.08, 0.09, 0.07, 0.07, 0.10, 0.06, 0.05, 0.03, 0.06]
+
+TRAIN_COLUMNS = [
+    "admission_id", "patient_id", "hospital_site", "admit_date", "discharge_date",
+    "age", "sex", "insurance_type", "admission_source", "primary_dx_group",
+    "comorbidity_count", "los_days", "n_prior_admissions_12m", "n_ed_visits_6m",
+    "num_medications", "bmi", "lab_creatinine_last", "lab_sodium_last",
+    "lab_hemoglobin_last", "systolic_bp_last", "heart_rate_last",
+    "discharge_disposition", "weekend_discharge", "followup_visit_scheduled",
     "post_discharge_call_logged", "readmitted_30d",
 ]
-
-SITE_VALUES = [f"Site_{i}" for i in range(1, 7)]
-SITE_P = [0.25, 0.20, 0.18, 0.15, 0.12, 0.10]
-DX_VALUES = [
-    "Cardiovascular", "Respiratory", "Endocrine_Diabetes", "Renal",
-    "Gastrointestinal", "Neurological", "Musculoskeletal",
-    "Infectious_Diseases", "Oncology", "Mental_Health", "Hematology", "Other",
-]
-DX_P = [0.15, 0.12, 0.12, 0.08, 0.09, 0.07, 0.07, 0.10, 0.06, 0.05, 0.03, 0.06]
+HOLDOUT_COLUMNS = [c for c in TRAIN_COLUMNS if c != "readmitted_30d"]
 
 
-def weighted_choice(rng, values, probabilities, size=None):
+def weighted_choice(rng: np.random.Generator, values, probabilities, size=None):
     return rng.choice(values, size=size, p=probabilities)
 
 
-def make_patient_population(rng, n_patients: int):
-    # Age groups: 15%, 20%, 25%, 25%, 15%.
-    age_group = rng.choice(5, size=n_patients, p=[.15, .20, .25, .25, .15])
-    bounds = [(18, 35), (36, 50), (51, 65), (66, 80), (81, 95)]
-    ages = np.array([rng.integers(bounds[g][0], bounds[g][1] + 1) for g in age_group])
-    sex = rng.choice(["F", "M"], size=n_patients, p=[.52, .48])
-    return pd.DataFrame({
-        "patient_id": [f"P{i:06d}" for i in range(n_patients)],
-        "base_age": ages,
-        "sex": sex,
-        "utilization_propensity": rng.normal(0, 1, n_patients),
-    })
+def sample_age(rng: np.random.Generator, n: int) -> np.ndarray:
+    bands = [(18, 35), (36, 50), (51, 65), (66, 80), (81, 95)]
+    probs = [0.15, 0.20, 0.25, 0.25, 0.15]
+    choices = rng.choice(len(bands), size=n, p=probs)
+    return np.array([rng.integers(bands[i][0], bands[i][1] + 1) for i in choices])
 
 
-def allocate_admissions(rng, n_total: int, n_patients: int):
+def sample_comorbidities(rng: np.random.Generator, ages: np.ndarray) -> np.ndarray:
+    # Age shifts the distribution upward while preserving the agreed overall mix approximately.
+    out = np.empty(len(ages), dtype=int)
+    for i, age in enumerate(ages):
+        probs = np.array([0.15, 0.35, 0.30, 0.15, 0.05], dtype=float)
+        if age >= 66:
+            probs += np.array([-0.06, -0.05, 0.02, 0.05, 0.04])
+        elif age <= 35:
+            probs += np.array([0.08, 0.02, -0.05, -0.03, -0.02])
+        probs = np.clip(probs, 0.005, None)
+        probs /= probs.sum()
+        band = rng.choice(5, p=probs)
+        out[i] = [0, rng.integers(1, 3), rng.integers(3, 5), rng.integers(5, 7), rng.integers(7, 11)][band]
+    return out
+
+
+def sample_los(rng: np.random.Generator, diagnoses: np.ndarray) -> np.ndarray:
+    # Keep the agreed overall LOS mix; diagnosis-specific variation is deliberately
+    # modest so it does not overwhelm the documented marginal distribution.
+    base = np.array([0.25, 0.35, 0.25, 0.12, 0.03], dtype=float)
+    result = np.empty(len(diagnoses), dtype=int)
+    higher_complexity = {"Cardiovascular", "Renal", "Oncology", "Infectious Diseases"}
+    for i, dx in enumerate(diagnoses):
+        p = base.copy()
+        if dx in higher_complexity:
+            p += np.array([-0.01, -0.005, 0.005, 0.007, 0.003])
+        else:
+            p += np.array([0.003, 0.002, -0.002, -0.002, -0.001])
+        p = np.clip(p, 0.001, None)
+        p /= p.sum()
+        band = rng.choice(5, p=p)
+        result[i] = [rng.integers(1, 3), rng.integers(3, 5), rng.integers(5, 8), rng.integers(8, 15), rng.integers(15, 22)][band]
+    return result
+
+
+def build_event_schedule(rng: np.random.Generator, patients: np.ndarray, event_patient_ids: np.ndarray):
+    """Create exact train/holdout counts and non-overlapping patient timelines.
+
+    Each patient selected for holdout has at least one earlier training admission.
+    Repeated admissions are clustered sufficiently closely to create meaningful
+    12-month history while retaining a minimum 35-day gap after prior discharge.
     """
-    Make approximately 30% of patients have multiple admissions.
-    Each repeat patient receives at least 2 admissions; remaining admissions
-    are distributed among repeat patients.
-    """
-    n_repeat = int(round(0.30 * n_patients))
-    counts = np.ones(n_patients, dtype=int)
-    counts[:n_repeat] = 2
-    extra = n_total - counts.sum()
-    if extra < 0:
-        raise ValueError("Patient count too small for requested repeat share.")
-    # Additional admissions are concentrated among repeat patients.
-    recipients = rng.choice(n_repeat, size=extra, replace=True)
-    np.add.at(counts, recipients, 1)
-    rng.shuffle(counts)
-    # Re-shuffle patient ordering is handled by patient IDs; count sum is exact.
-    return counts
+    counts = pd.Series(event_patient_ids).value_counts()
+    repeat_patients = counts[counts >= 2].index.to_numpy()
+    single_patients = counts[counts == 1].index.to_numpy()
+    # Keep a meaningful overlap between train and holdout while retaining a
+    # substantial set of previously unseen patients in the future period.
+    n_shared_holdout = min(2_000, len(repeat_patients))
+    n_new_holdout = N_HOLDOUT - n_shared_holdout
+    if len(single_patients) < n_new_holdout:
+        raise RuntimeError("Not enough single-admission patients for holdout allocation")
+    holdout_patients = set(rng.choice(repeat_patients, size=n_shared_holdout, replace=False).tolist())
+    holdout_patients.update(rng.choice(single_patients, size=n_new_holdout, replace=False).tolist())
+    records = []
+    train_start, train_end = date(2021, 1, 1), date(2023, 12, 31)
+    holdout_start, holdout_end = date(2024, 1, 1), date(2024, 3, 31)
+
+    for pid in patients:
+        n_events = int(counts.get(pid, 0))
+        has_holdout = pid in holdout_patients
+        n_train = n_events - int(has_holdout)
+        # A 56-100 day interval leaves room for a maximum 21-day stay plus
+        # a 35-day separation before the next admission.
+        if n_train:
+            span = (train_end - train_start).days
+            first_latest = train_end - timedelta(days=100 * (n_train - 1))
+            first_offset = int(rng.integers(0, max(1, (first_latest - train_start).days + 1)))
+            current = train_start + timedelta(days=first_offset)
+            for j in range(n_train):
+                if j:
+                    current += timedelta(days=int(rng.integers(56, 101)))
+                records.append((pid, current, "train"))
+        if has_holdout:
+            hold_date = holdout_start + timedelta(days=int(rng.integers(0, (holdout_end-holdout_start).days + 1)))
+            records.append((pid, hold_date, "holdout"))
+
+    schedule = pd.DataFrame(records, columns=["patient_id", "admit_date", "split"])
+    # If a patient's final training stay would overlap the holdout admission, move
+    # the holdout admission forward within its permitted quarter.
+    for pid, group in schedule.groupby("patient_id"):
+        tr = group[group.split == "train"].sort_values("admit_date")
+        ho_idx = group[group.split == "holdout"].index
+        if len(tr) and len(ho_idx):
+            earliest = tr.iloc[-1].admit_date + timedelta(days=56)
+            idx = ho_idx[0]
+            if schedule.loc[idx, "admit_date"] < earliest:
+                schedule.loc[idx, "admit_date"] = earliest
+    # A 35-day gap is enforced between the prior discharge and next admission.
+    schedule = schedule.sort_values(["patient_id", "admit_date"]).reset_index(drop=True)
+    for pid, group in schedule.groupby("patient_id"):
+        prev_discharge = None
+        for idx in group.index:
+            admit = schedule.loc[idx, "admit_date"]
+            if prev_discharge is not None and admit < prev_discharge + timedelta(days=56):
+                adjusted = prev_discharge + timedelta(days=56)
+                split = schedule.loc[idx, "split"]
+                upper = train_end if split == "train" else holdout_end
+                if adjusted > upper:
+                    raise RuntimeError(f"Unable to schedule non-overlapping admissions for {pid}")
+                schedule.loc[idx, "admit_date"] = adjusted
+                admit = adjusted
+            prev_discharge = admit
+    if (schedule.split == "train").sum() != N_TRAIN or (schedule.split == "holdout").sum() != N_HOLDOUT:
+        raise RuntimeError("Schedule did not preserve required split sizes")
+    return schedule.sort_values("admit_date").reset_index(drop=True)
 
 
-def make_admission_schedule(rng, patients: pd.DataFrame, counts: np.ndarray):
-    frames = []
-    patient_idx = np.repeat(np.arange(len(patients)), counts)
-    rng.shuffle(patient_idx)
-    # Assign exactly 60k admissions to 2021-23 and 8k to 2024 Q1.
-    train_dates = pd.to_datetime(rng.integers(
-        pd.Timestamp("2021-01-01").value // 10**9,
-        pd.Timestamp("2024-01-01").value // 10**9,
-        size=N_TRAIN
-    ), unit="s").normalize()
-    holdout_dates = pd.to_datetime(rng.integers(
-        pd.Timestamp("2024-01-01").value // 10**9,
-        pd.Timestamp("2024-04-01").value // 10**9,
-        size=N_HOLDOUT
-    ), unit="s").normalize()
-    dates = np.concatenate([train_dates.values, holdout_dates.values])
-    periods = np.array(["train"] * N_TRAIN + ["holdout"] * N_HOLDOUT)
-    order = np.argsort(dates, kind="stable")
-    patient_idx = patient_idx[order]
-    dates = dates[order]
-    periods = periods[order]
-    df = pd.DataFrame({
-        "patient_index": patient_idx,
-        "admit_date": pd.to_datetime(dates),
-        "period": periods,
-    })
-    # Ensure patient histories are temporally plausible by allowing repeated
-    # admissions at least 35 days apart. Reassign collisions forward.
-    df = df.sort_values(["patient_index", "admit_date"]).reset_index(drop=True)
-    for idx in range(1, len(df)):
-        if df.loc[idx, "patient_index"] == df.loc[idx - 1, "patient_index"]:
-            min_date = df.loc[idx - 1, "admit_date"] + pd.Timedelta(days=35)
-            if df.loc[idx, "admit_date"] < min_date:
-                df.loc[idx, "admit_date"] = min_date
-    # Restore requested period sizes after date adjustment; period follows the
-    # original generated admission slot, and dates are kept inside broad bounds.
-    # A small number may cross a boundary after collision adjustment; clip safely.
-    train_mask = df["period"].eq("train")
-    df.loc[train_mask, "admit_date"] = df.loc[train_mask, "admit_date"].clip(
-        lower=pd.Timestamp("2021-01-01"), upper=pd.Timestamp("2023-12-31"))
-    hold_mask = ~train_mask
-    df.loc[hold_mask, "admit_date"] = df.loc[hold_mask, "admit_date"].clip(
-        lower=pd.Timestamp("2024-01-01"), upper=pd.Timestamp("2024-03-31"))
-    # Stable ordering not required in output.
-    return df
+def make_dates(rng: np.random.Generator, n: int, start: date, end: date) -> list[date]:
+    span = (end - start).days + 1
+    offsets = rng.integers(0, span, size=n)
+    return [start + timedelta(days=int(x)) for x in offsets]
 
 
-def generate():
-    rng = np.random.default_rng(SEED)
+def make_patient_assignments(rng: np.random.Generator, n_total: int):
+    # 70% single-admission patients; 20% have two admissions; 10% have five.
+    # This makes exactly 30% of patients multi-admission patients and sums to n_total.
+    n_patients = round(n_total / 1.6)
+    n_single = int(round(n_patients * 0.70))
+    n_double = int(round(n_patients * 0.20))
+    n_five = n_patients - n_single - n_double
+    counts = np.array([1] * n_single + [2] * n_double + [5] * n_five, dtype=int)
+    # Reconcile rounding while preserving total admissions.
+    delta = n_total - int(counts.sum())
+    if delta > 0:
+        counts[-delta:] += 1
+    elif delta < 0:
+        for idx in range(len(counts) - 1, -1, -1):
+            if delta == 0:
+                break
+            if counts[idx] > 1:
+                counts[idx] -= 1
+                delta += 1
+    if counts.sum() != n_total:
+        raise RuntimeError("Could not reconcile patient admission counts")
+    patient_ids = np.array([f"P{i:06d}" for i in range(n_patients)], dtype=object)
+    event_patient_ids = np.repeat(patient_ids, counts)
+    rng.shuffle(event_patient_ids)
+    return patient_ids, event_patient_ids
 
-    # 68,000 admissions; 47,600 unique patients gives 30% repeat patients
-    # by construction (some repeat patients receive >2 admissions).
-    n_patients = 47_600
-    patients = make_patient_population(rng, n_patients)
-    counts = allocate_admissions(rng, N_TRAIN + N_HOLDOUT, n_patients)
-    schedule = make_admission_schedule(rng, patients, counts)
-    df = schedule.merge(patients.reset_index().rename(columns={"index": "patient_index"}),
-                        on="patient_index", how="left")
-    df = df.sort_values(["admit_date", "patient_id"]).reset_index(drop=True)
-    df["admission_id"] = [f"A{i:07d}" for i in range(len(df))]
 
-    # Admission-specific characteristics.
-    n = len(df)
-    age_elapsed = (df["admit_date"] - pd.Timestamp("2021-01-01")).dt.days / 365.25
-    df["age"] = (df["base_age"] + np.floor(age_elapsed / 4)).clip(18, 100).astype(int)
-    df["hospital_site"] = weighted_choice(rng, SITE_VALUES, SITE_P, n)
-    df["insurance_type"] = weighted_choice(
-        rng, ["Medicare", "Commercial", "Medicaid", "Self-pay"], [.45, .30, .20, .05], n)
-    df["admission_source"] = weighted_choice(
-        rng, ["Emergency", "Referral", "Transfer"], [.60, .25, .15], n)
-    df["primary_dx_group"] = weighted_choice(rng, DX_VALUES, DX_P, n)
-
-    # Comorbidities correlated with age.
-    age_factor = (df["age"].to_numpy() - 18) / 82
-    comorb = rng.poisson(0.9 + 2.8 * age_factor, n)
-    comorb += rng.binomial(1, .10, n)
-    df["comorbidity_count"] = np.clip(comorb, 0, 10).astype(int)
-
-    # Length of stay: diagnosis and complexity influence the distribution.
-    los_base = rng.choice([1, 2, 3, 4, 5, 6, 7, 10, 14, 20],
-                          size=n, p=[.12, .13, .18, .17, .10, .08, .07, .08, .04, .03])
-    complexity = (df["comorbidity_count"].to_numpy() >= 4).astype(int)
-    df["los_days"] = np.clip(los_base + rng.binomial(2, .25, n) + complexity, 1, 30).astype(int)
-    df["discharge_date"] = df["admit_date"] + pd.to_timedelta(df["los_days"], unit="D")
-
-    # Count prior admissions in the preceding 12 months from generated records.
-    prior_counts = np.zeros(n, dtype=int)
-    ed_counts = np.zeros(n, dtype=int)
-    for p_idx, group in df.groupby("patient_index", sort=False):
-        positions = group.index.to_numpy()
-        dates = group["admit_date"].to_numpy(dtype="datetime64[D]")
-        for j, pos in enumerate(positions):
-            if j:
-                delta = (dates[j] - dates[:j]).astype("timedelta64[D]").astype(int)
-                prior_counts[pos] = int(np.sum(delta <= 365))
-    df["n_prior_admissions_12m"] = np.minimum(prior_counts, 8)
-
-    # ED use: correlated with past admissions and patient utilization propensity.
-    prop = df["utilization_propensity"].to_numpy()
-    ed_lambda = np.clip(.35 + .30 * np.maximum(prop, -1) + .30 * df["n_prior_admissions_12m"].to_numpy(), .10, 3.5)
-    df["n_ed_visits_6m"] = np.clip(rng.poisson(ed_lambda), 0, 8).astype(int)
-
-    # Discharge medication burden correlated with age/comorbidities.
-    med_mean = 3.0 + .75 * df["comorbidity_count"].to_numpy() + .025 * df["age"].to_numpy()
-    df["num_medications"] = np.clip(rng.poisson(med_mean), 0, 30).astype(int)
-
-    # BMI: mixture across broad categories, with plausible continuous values.
-    bmi_ranges = [(14, 18.49), (18.5, 24.9), (25, 29.9), (30, 34.9), (35, 39.9), (40, 55)]
-    bmi_probs = [.05, .25, .30, .20, .12, .08]
-    bmi_group = rng.choice(len(bmi_ranges), n, p=bmi_probs)
-    df["bmi"] = np.array([rng.uniform(*bmi_ranges[g]) for g in bmi_group]).round(1)
-
-    dx = df["primary_dx_group"].to_numpy()
-    renal = dx == "Renal"
-    cardio = dx == "Cardiovascular"
-    respiratory = dx == "Respiratory"
-    infectious = dx == "Infectious_Diseases"
-
-    creat = rng.lognormal(mean=np.log(1.0) + .10 * df["comorbidity_count"].to_numpy()
-                          + .35 * renal, sigma=.35, size=n)
-    df["lab_creatinine_last"] = np.clip(creat, .4, 5.0).round(2)
-    sodium = rng.normal(139 - 1.5 * infectious - .6 * df["comorbidity_count"].to_numpy(), 2.5, n)
-    df["lab_sodium_last"] = np.clip(sodium, 125, 150).round(1)
-    hemoglobin = rng.normal(13.2 - .35 * df["comorbidity_count"].to_numpy()
-                            - .8 * (df["sex"].to_numpy() == "F")
-                            - .7 * (dx == "Hematology"), 1.5, n)
-    df["lab_hemoglobin_last"] = np.clip(hemoglobin, 6, 18).round(1)
-    sbp = rng.normal(125 + .25 * (df["age"].to_numpy() - 50)
-                     + 4 * cardio, 15, n)
-    df["systolic_bp_last"] = np.clip(sbp, 75, 210).round(0)
-    hr = rng.normal(78 + 5 * respiratory + 4 * infectious, 12, n)
-    df["heart_rate_last"] = np.clip(hr, 40, 150).round(0)
-
-    # Discharge disposition influenced by age and complexity.
-    disp_score = (df["age"].to_numpy() > 75).astype(float) + .25 * df["comorbidity_count"].to_numpy()
-    probs = np.column_stack([
-        np.exp(-.20 * disp_score), np.exp(.10 * disp_score),
-        np.exp(.30 * disp_score), np.exp(.20 * disp_score)
-    ])
-    probs = probs / probs.sum(axis=1, keepdims=True)
-    disp_values = np.array(["Home", "Home with services", "Skilled nursing", "Rehab"])
-    df["discharge_disposition"] = [rng.choice(disp_values, p=probs[i]) for i in range(n)]
-
-    df["weekend_discharge"] = df["discharge_date"].dt.dayofweek.ge(5).astype(int)
-    follow_prob = np.clip(.55 + .08 * (df["age"].to_numpy() > 65)
-                          + .025 * df["comorbidity_count"].to_numpy(), .40, .90)
-    df["followup_visit_scheduled"] = rng.binomial(1, follow_prob, n)
-    df["post_discharge_call_logged"] = rng.binomial(1, .30, n)
-
-    # Synthetic label: multi-factor logit plus noise, then intercept calibration
-    # to an expected 15% prevalence. Holdout labels are removed from the CSV.
-    def sigmoid(x):
-        return 1 / (1 + np.exp(-np.clip(x, -30, 30)))
-
-    creat_arr = df["lab_creatinine_last"].to_numpy()
-    sodium_arr = df["lab_sodium_last"].to_numpy()
-    hb_arr = df["lab_hemoglobin_last"].to_numpy()
-    sbp_arr = df["systolic_bp_last"].to_numpy()
-    hr_arr = df["heart_rate_last"].to_numpy()
-    dx_risk = np.select(
-        [renal, cardio, respiratory, infectious, dx == "Oncology", dx == "Mental_Health"],
-        [.45, .30, .25, .25, .35, .12], default=0.0)
-    linear = (
-        .022 * (df["age"].to_numpy() - 60)
-        + .20 * df["comorbidity_count"].to_numpy()
-        + .32 * df["n_prior_admissions_12m"].to_numpy()
-        + .16 * df["n_ed_visits_6m"].to_numpy()
-        + .035 * (df["los_days"].to_numpy() - 4)
-        + .035 * (df["num_medications"].to_numpy() - 8)
-        + .55 * np.maximum(creat_arr - 1.2, 0)
-        + .07 * np.abs(sodium_arr - 139)
-        + .10 * np.maximum(12 - hb_arr, 0)
-        + .012 * np.abs(sbp_arr - 125)
-        + .012 * np.abs(hr_arr - 80)
-        + dx_risk
-        + .20 * (df["admission_source"].to_numpy() == "Emergency")
-        + .18 * np.isin(df["discharge_disposition"].to_numpy(), ["Skilled nursing", "Rehab"])
-        - .30 * df["followup_visit_scheduled"].to_numpy()
-        + .12 * (df["bmi"].to_numpy() >= 35)
-        + rng.normal(0, .35, n)
-    )
-    lo, hi = -12.0, 2.0
-    for _ in range(60):
+def calibrate_intercept(linear_predictor: np.ndarray, target: float = 0.15) -> float:
+    lo, hi = -15.0, 5.0
+    for _ in range(100):
         mid = (lo + hi) / 2
-        if sigmoid(linear + mid).mean() > .15:
+        mean_p = np.mean(1 / (1 + np.exp(-np.clip(linear_predictor + mid, -30, 30))))
+        if mean_p > target:
             hi = mid
         else:
             lo = mid
-    probabilities = sigmoid(linear + (lo + hi) / 2)
-    df["readmitted_30d"] = rng.binomial(1, probabilities, n)
+    return (lo + hi) / 2
 
-    # Ensure the requested exact row counts and preserve time-based datasets.
-    train = df[df["period"] == "train"].copy()
-    holdout = df[df["period"] == "holdout"].copy()
-    # Dates are generated in the respective ranges; remove internal-only fields.
-    train = train[COLUMNS]
-    holdout = holdout[[c for c in COLUMNS if c != "readmitted_30d"]]
-    for part in (train, holdout):
-        part["admit_date"] = pd.to_datetime(part["admit_date"]).dt.strftime("%Y-%m-%d")
-        part["discharge_date"] = pd.to_datetime(part["discharge_date"]).dt.strftime("%Y-%m-%d")
 
-    # Required missingness: approximately 4% independently in each clinical field.
-    missing_rng = np.random.default_rng(SEED + 1)
-    missing_cols = [
-        "lab_creatinine_last", "lab_sodium_last", "lab_hemoglobin_last",
-        "systolic_bp_last", "heart_rate_last"
-    ]
-    for part in (train, holdout):
-        for col in missing_cols:
-            mask = missing_rng.random(len(part)) < .04
-            part.loc[mask, col] = np.nan
+def generate() -> None:
+    rng = np.random.default_rng(SEED)
+    n_total = N_TRAIN + N_HOLDOUT
+    patients, event_patient_ids = make_patient_assignments(rng, n_total)
 
-    RAW_DIR.mkdir(parents=True, exist_ok=True)
-    train.to_csv(RAW_DIR / "train.csv", index=False)
-    holdout.to_csv(RAW_DIR / "holdout.csv", index=False)
+    # Build chronological patient histories with exact split sizes and no overlapping stays.
+    events = build_event_schedule(rng, patients, event_patient_ids)
 
-    print(f"Generated: {RAW_DIR / 'train.csv'} ({len(train):,} rows, {len(train.columns)} columns)")
-    print(f"Generated: {RAW_DIR / 'holdout.csv'} ({len(holdout):,} rows, {len(holdout.columns)} columns)")
-    print(f"Training readmission prevalence: {train['readmitted_30d'].mean():.2%}")
-    print(f"Internal holdout prevalence diagnostic (not exported): {df.loc[df['period'] == 'holdout', 'readmitted_30d'].mean():.2%}")
-    print(f"Unique patients: {df['patient_id'].nunique():,}")
-    print(f"Patients with >1 admission: {(df.groupby('patient_id').size() > 1).mean():.2%}")
+    patient_age = dict(zip(patients, sample_age(rng, len(patients))))
+    patient_sex = dict(zip(patients, weighted_choice(rng, ["F", "M"], [0.52, 0.48], len(patients))))
+    patient_ed_rate = dict(zip(patients, rng.uniform(0.15, 1.2, len(patients))))
+
+    # Per-patient previous admission dates are tracked as records are generated chronologically.
+    history: dict[str, list[date]] = {p: [] for p in patients}
+    rows = []
+    for idx, ev in events.iterrows():
+        pid = ev.patient_id
+        admit = ev.admit_date
+        prior_dates = history[pid]
+        prior_12m = sum((admit - d).days <= 365 for d in prior_dates if d < admit)
+        prior_6m_admits = sum((admit - d).days <= 183 for d in prior_dates if d < admit)
+        # ED visits include a patient-specific background propensity plus prior acute admissions.
+        ed_lambda = patient_ed_rate[pid] + 0.35 * prior_6m_admits
+        ed_count = min(int(rng.poisson(ed_lambda)), 8)
+        age = min(95, patient_age[pid] + max(0, (admit - date(2021, 1, 1)).days // 365))
+        sex = patient_sex[pid]
+
+        site = weighted_choice(rng, SITES, SITE_P)
+        insurance = weighted_choice(rng, ["Medicare", "Commercial", "Medicaid", "Self-pay"], [0.45, 0.30, 0.20, 0.05])
+        source = weighted_choice(rng, ["Emergency", "Referral", "Transfer"], [0.60, 0.25, 0.15])
+        dx = weighted_choice(rng, DIAGNOSES, DIAG_P)
+        comorb = int(sample_comorbidities(rng, np.array([age]))[0])
+        los = int(sample_los(rng, np.array([dx]))[0])
+
+        # Correlated discharge medication burden, BMI, labs and disposition.
+        med_mu = 5.0 + 1.15 * comorb + (1.2 if age >= 65 else 0)
+        meds = int(np.clip(round(rng.normal(med_mu, 3.0)), 0, 28))
+        bmi = float(np.clip(rng.normal(27.5 + (1.0 if dx == "Endocrine / Diabetes" else 0), 6.2), 14, 55))
+        renal_shift = 0.8 if dx == "Renal" else 0.0
+        creat = float(np.clip(rng.lognormal(mean=np.log(1.0 + renal_shift + 0.07 * comorb), sigma=0.45), 0.4, 5.0))
+        sodium = float(np.clip(rng.normal(140 - (1.0 if dx in {"Renal", "Cardiovascular"} else 0) - 0.25 * comorb, 3.2), 125, 150))
+        hemoglobin = float(np.clip(rng.normal((13.2 if sex == "M" else 12.2) - 0.25 * comorb - (0.7 if dx == "Hematology" else 0), 1.8), 6, 18))
+        systolic = float(np.clip(rng.normal(124 + 0.18 * age - 0.9 * comorb, 17), 75, 210))
+        heart_rate = float(np.clip(rng.normal(76 + 0.7 * comorb + (4 if source == "Emergency" else 0), 12), 40, 150))
+
+        # The baseline mix follows the agreed overall proportions. Small risk-related
+        # shifts preserve realistic variation without distorting the marginal mix.
+        disp_logits = np.log(np.array([0.55, 0.20, 0.15, 0.10]))
+        severity = 0.004 * max(age - 60, 0) + 0.025 * max(comorb - 2, 0)
+        disp_logits = disp_logits + np.array([-0.35, 0.05, 0.18, 0.12]) * severity
+        disp_p = np.exp(disp_logits - disp_logits.max()); disp_p /= disp_p.sum()
+        disposition = weighted_choice(rng, ["Home", "Home with services", "Skilled nursing", "Rehab"], disp_p)
+        followup_p = np.clip(0.65 + 0.05 * (comorb >= 4) + 0.03 * (age >= 70) - 0.04 * (source == "Emergency"), 0.45, 0.85)
+        followup = int(rng.random() < followup_p)
+        post_call = int(rng.random() < 0.30)
+        discharge = admit + timedelta(days=los)
+        weekend = int(discharge.weekday() >= 5)
+
+        # Retain raw values; missingness is applied to the five required lab/vital fields.
+        clinical = [creat, sodium, hemoglobin, systolic, heart_rate]
+        for j in range(len(clinical)):
+            if rng.random() < 0.04:
+                clinical[j] = np.nan
+
+        rows.append({
+            "admission_id": f"A{idx + 1:07d}", "patient_id": pid, "hospital_site": site,
+            "admit_date": admit, "discharge_date": discharge, "age": int(age), "sex": sex,
+            "insurance_type": insurance, "admission_source": source, "primary_dx_group": dx,
+            "comorbidity_count": comorb, "los_days": los, "n_prior_admissions_12m": int(prior_12m),
+            "n_ed_visits_6m": ed_count, "num_medications": meds, "bmi": round(bmi, 1),
+            "lab_creatinine_last": round(clinical[0], 2) if pd.notna(clinical[0]) else np.nan,
+            "lab_sodium_last": round(clinical[1], 1) if pd.notna(clinical[1]) else np.nan,
+            "lab_hemoglobin_last": round(clinical[2], 1) if pd.notna(clinical[2]) else np.nan,
+            "systolic_bp_last": round(clinical[3], 1) if pd.notna(clinical[3]) else np.nan,
+            "heart_rate_last": round(clinical[4], 1) if pd.notna(clinical[4]) else np.nan,
+            "discharge_disposition": disposition, "weekend_discharge": weekend,
+            "followup_visit_scheduled": followup, "post_discharge_call_logged": post_call,
+        })
+        history[pid].append(admit)
+
+    df = pd.DataFrame(rows)
+    # Generate labels using only discharge-time predictors; post-discharge call is not used.
+    dx_effect = {
+        "Cardiovascular": 0.35, "Respiratory": 0.30, "Endocrine / Diabetes": 0.20,
+        "Renal": 0.40, "Gastrointestinal": 0.05, "Neurological": 0.10,
+        "Musculoskeletal": -0.10, "Infectious Diseases": 0.25, "Oncology": 0.35,
+        "Mental Health": 0.10, "Hematology": 0.20, "Other": 0.0,
+    }
+    lp = (
+        0.018 * (df.age.to_numpy() - 60)
+        + 0.22 * df.comorbidity_count.to_numpy()
+        + 0.34 * df.n_prior_admissions_12m.to_numpy()
+        + 0.13 * df.n_ed_visits_6m.to_numpy()
+        + 0.025 * (df.los_days.to_numpy() - 4)
+        + 0.035 * (df.num_medications.to_numpy() - 8)
+        + np.array([dx_effect[x] for x in df.primary_dx_group])
+        + 0.35 * (df.discharge_disposition.isin(["Skilled nursing", "Rehab"]).to_numpy())
+        + 0.20 * (df.discharge_disposition.eq("Home with services").to_numpy())
+        - 0.30 * df.followup_visit_scheduled.to_numpy()
+        + 0.12 * (df.admission_source.eq("Emergency").to_numpy())
+        + 0.10 * (df.weekend_discharge.to_numpy())
+        + 0.08 * np.nan_to_num((df.lab_creatinine_last.to_numpy() - 1.0), nan=0.0).clip(0, 3)
+        + 0.05 * np.nan_to_num((140 - df.lab_sodium_last.to_numpy()), nan=0.0).clip(0, 15) / 5
+        + 0.06 * np.nan_to_num((12 - df.lab_hemoglobin_last.to_numpy()), nan=0.0).clip(0, 6) / 2
+        + 0.04 * np.nan_to_num((df.heart_rate_last.to_numpy() - 80), nan=0.0).clip(0, 50) / 10
+        + rng.normal(0, 0.65, len(df))
+    )
+    intercept = calibrate_intercept(lp, 0.15)
+    probability = 1 / (1 + np.exp(-np.clip(lp + intercept, -30, 30)))
+    df["readmitted_30d"] = rng.binomial(1, probability).astype(int)
+
+    train_mask = pd.to_datetime(df.admit_date) < pd.Timestamp("2024-01-01")
+    train = df.loc[train_mask, TRAIN_COLUMNS].copy()
+    holdout = df.loc[~train_mask, HOLDOUT_COLUMNS].copy()
+    # Keep dates as ISO strings for portable CSV interchange.
+    for frame in (train, holdout):
+        frame["admit_date"] = pd.to_datetime(frame.admit_date).dt.strftime("%Y-%m-%d")
+        frame["discharge_date"] = pd.to_datetime(frame.discharge_date).dt.strftime("%Y-%m-%d")
+    OUT.mkdir(parents=True, exist_ok=True)
+    train.to_csv(OUT / "train.csv", index=False)
+    holdout.to_csv(OUT / "holdout.csv", index=False)
+
+    print(f"Training rows/columns: {train.shape}; readmission prevalence: {train.readmitted_30d.mean():.3%}")
+    print(f"Holdout rows/columns: {holdout.shape}; internal prevalence diagnostic: {df.loc[~train_mask, 'readmitted_30d'].mean():.3%}")
+    print("Missingness in specified clinical fields (train):")
+    print(train[["lab_creatinine_last", "lab_sodium_last", "lab_hemoglobin_last", "systolic_bp_last", "heart_rate_last"]].isna().mean().round(4).to_string())
+    multi_share = (pd.Series(event_patient_ids).value_counts() > 1).mean()
+    print(f"Patients with multiple admissions: {multi_share:.3%}")
+    print(f"Wrote: {OUT / 'train.csv'} and {OUT / 'holdout.csv'}")
 
 
 if __name__ == "__main__":
