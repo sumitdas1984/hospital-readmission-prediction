@@ -125,10 +125,59 @@ uv run python code/evaluate.py
 Prerequisites: Phase 3 model artifacts, temporal splits, and `code/feature_config.py` must already be present. The script reads only `data/processed/internal_test.csv`; it does not access the 2024 holdout.
 
 
-## Holdout Prediction Generation
+## Phase 5 — Holdout Prediction Generation
 
 Run from repository root:
 ```bash
 uv run python code/generate_predictions.py
 ```
 The project must already contain `data/raw/train.csv` and `data/raw/holdout.csv` and the required approved dependencies (`pandas`, `scikit-learn`, `joblib`). Do not add `readmitted_30d` to holdout.
+
+
+## Phase 6 — Local backend and care-management frontend
+
+The existing Phase 5 model artifact must be at `models/logistic_regression_final.joblib`.
+The existing holdout CSV must be at `data/raw/holdout.csv`.
+
+### Start the backend
+From repository root:
+```bash
+uv run uvicorn backend.app.main:app --host 127.0.0.1 --port 8000
+```
+
+Health check:
+`http://127.0.0.1:8000/health`
+
+Interactive API docs:
+`http://127.0.0.1:8000/docs`
+
+### Start the frontend
+Open a second terminal from repository root:
+```bash
+uv run streamlit run frontend/app.py
+```
+The frontend calls only the backend API. Default backend URL is `http://127.0.0.1:8000`.
+To override:
+```bash
+API_BASE_URL=http://127.0.0.1:8000 uv run streamlit run frontend/app.py
+```
+On Windows PowerShell:
+```powershell
+$env:API_BASE_URL="http://127.0.0.1:8000"
+uv run streamlit run frontend/app.py
+```
+
+### API endpoints
+- `GET /health` — service and artifact availability
+- `POST /predict` — score one record; JSON body: `{"admission_id":"A123","features":{...20 model features...}}`
+- `POST /predict/batch` — score 1–2,000 records
+- `GET /call-list` — ranks holdout admissions and returns `ceil(5% × N)` records
+
+### Important design notes
+- The backend loads the final saved sklearn pipeline; it does not retrain.
+- The call list is generated from the holdout admissions and capped at 5%.
+- The API validates that required model features are present.
+- The UI displays risk ranking, simple descriptive signals, and score limitations.
+- Reason strings are transparent rule-based cues, not SHAP explanations, causal explanations, or the model's full feature attribution.
+- Do not expose this synthetic prototype as a real clinical service. The dataset is synthetic and the model is not clinically validated.
+- The assignment specifies use of approved internal package sources only. Install dependencies only through the approved Artifactory/package process; do not use public PyPI/npm.

@@ -1,0 +1,24 @@
+{
+  "model_features": [
+    "age",
+    "comorbidity_count",
+    "los_days",
+    "n_prior_admissions_12m",
+    "n_ed_visits_6m",
+    "num_medications",
+    "bmi",
+    "lab_creatinine_last",
+    "lab_sodium_last",
+    "lab_hemoglobin_last",
+    "systolic_bp_last",
+    "heart_rate_last",
+    "weekend_discharge",
+    "followup_visit_scheduled",
+    "hospital_site",
+    "sex",
+    "insurance_type",
+    "admission_source",
+    "primary_dx_group",
+    "discharge_disposition"
+  ]
+}

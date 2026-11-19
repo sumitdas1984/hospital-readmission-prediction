@@ -213,7 +213,7 @@ Avoid jumping ahead or expanding scope while a phase is still being validated. I
 | 2 | Data Audit and Validation | Complete |
 | 3 | Baseline and Stronger Model Development | Complete |
 | 4 | Model Evaluation and Calibration | Complete |
-| 5 | Holdout Prediction Generation | **Complete** |
-| 6 | Backend Development | Next |
-| 7 | Frontend Development | Pending |
-| 8 | Documentation and Final Submission | Pending |
+| 5 | Holdout Prediction Generation | Complete |
+| 6 | Backend Development | Complete |
+| 7 | Frontend Development | **Complete** |
+| 8 | Documentation and Final Submission | Next |
