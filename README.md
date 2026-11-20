@@ -12,7 +12,7 @@ hospital-readmission-prediction/
 ├── data/
 │   ├── raw/                   # Generated raw datasets
 │   └── processed/             # Cleaned/transformed datasets
-├── code/                      # Audit, training, evaluation, prediction
+├── code/                      # Splitting, training, evaluation, prediction
 ├── models/                    # Saved model and preprocessing artifacts
 ├── backend/                   # FastAPI scoring service
 ├── frontend/                  # Streamlit application
@@ -38,10 +38,10 @@ This creates/updates the project virtual environment and installs the
 dependencies declared in `pyproject.toml`, including the development
 dependency group.
 
-Run Python scripts with:
+Run Python scripts from the repository root, for example:
 
 ```bash
-uv run python code/run_pipeline.py
+uv run python code/train_models.py
 ```
 
 Run the API (once implemented) with:

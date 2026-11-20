@@ -13,7 +13,7 @@
   "risk_score_min": 0.011705182124856956,
   "risk_score_max": 0.7699545673684534,
   "risk_score_mean": 0.12539534059837418,
-  "fit_seconds": 0.23,
+  "fit_seconds": 0.26,
   "model_parameters": {
     "C": 1.0,
     "max_iter": 1000,

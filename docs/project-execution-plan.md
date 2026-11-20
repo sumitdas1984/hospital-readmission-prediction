@@ -22,21 +22,24 @@ The solution must satisfy the assignment deliverables while remaining simple eno
 hospital-readmission-prediction/
 ├── synthetic_data_generator/
 │   ├── __init__.py
-│   └── generate_data.py
+│   └── generate.py
 ├── data/
 │   ├── raw/
 │   └── processed/
 ├── code/
-│   ├── run_pipeline.py
-│   ├── data_audit.py
-│   ├── train.py
+│   ├── create_temporal_splits.py
+│   ├── feature_config.py
+│   ├── preprocessing.py
+│   ├── train_models.py
 │   ├── evaluate.py
-│   ├── predict.py
+│   ├── generate_predictions.py
+│   ├── run_app.py
 │   └── README.md
 ├── models/
 ├── backend/
-│   ├── __init__.py
-│   └── main.py
+│   └── app/
+│       ├── __init__.py
+│       └── main.py
 ├── frontend/
 │   └── app.py
 ├── docs/
@@ -54,6 +57,8 @@ hospital-readmission-prediction/
 ```
 
 This structure is frozen. Change it only if an implementation or explicit assignment requirement makes a change necessary.
+
+Implementation changed it as follows. The planned `run_pipeline.py`, `data_audit.py`, and `predict.py` were never implemented — they remained empty stubs from the initial scaffold — so they were removed and their roles are filled by `create_temporal_splits.py`, `train_models.py`, `evaluate.py`, and `generate_predictions.py`, each run as its own step and documented in `code/README.md`. The one-time data audit is recorded in `docs/phase2-data-audit.md` rather than as a script. `train.py` became `train_models.py`, `generate_data.py` became `generate.py`, and the backend moved to `backend/app/main.py` to match the `backend.app.main:app` import path used to serve the API.
 
 ## 4. Execution Phases
 
