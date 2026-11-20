@@ -1,3 +1,3 @@
 # Recommendation to the Care-Management Lead
 
-_To be completed as a concise five-sentence recommendation._
+The model ranks discharged patients by estimated 30-day readmission risk so the team can focus its limited outreach capacity. Each week, review the highest-ranked 5% of admissions as a call-prioritization list, while applying clinical judgment and existing care protocols. On the synthetic internal test period, the selected list captured 46.31% precision and 15.86% recall at 5% capacity, but the scores were not perfectly calibrated probabilities. The results are based entirely on synthetic data and showed some decline from validation to the later test period, so they do not establish real-world clinical effectiveness. Do not use this prototype for patient care; consider it suitable only for demonstration and further validation before any operational pilot.
