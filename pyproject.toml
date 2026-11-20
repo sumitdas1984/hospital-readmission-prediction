@@ -10,6 +10,7 @@ dependencies = [
     "numpy",
     "pandas",
     "pydantic",
+    "requests>=2.34.2",
     "scikit-learn",
     "streamlit",
     "uvicorn[standard]",

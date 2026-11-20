@@ -1,0 +1,5 @@
+model,split,precision_at_5pct,recall_at_5pct,pr_auc,roc_auc,brier_score
+Logistic Regression,Validation (Jan-Jun 2023),0.552419,0.174745,0.398948,0.752227,0.115521
+Random Forest,Validation (Jan-Jun 2023),0.530242,0.16773,0.375229,0.742248,0.11815
+Logistic Regression,Internal test (Jul-Dec 2023),0.463127,0.158586,0.341206,0.743223,0.111924
+Random Forest,Internal test (Jul-Dec 2023),0.457227,0.156566,0.327962,0.730162,0.113294

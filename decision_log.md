@@ -1,8 +1,29 @@
-# Technical Decision Log
+# Technical Decision Log — 30-Day Hospital Readmission Risk
 
-Record key technical decisions, alternatives considered, rationale, and
-limitations. Keep this document within the assignment's two-page limit.
+## 1. Objective and operating point
+The care-management team can contact approximately 5% of discharged patients each week. The model is therefore designed to rank admissions for a capacity-constrained call list, not to classify every patient using a universal threshold. The primary metrics are Precision@5% (share of selected patients who are readmitted) and Recall@5% (share of all readmissions captured in the selected 5%). PR-AUC and ROC-AUC provide secondary ranking context; Brier score and calibration deciles assess probability quality. A false positive consumes a limited call slot; a false negative is a patient not prioritized who is subsequently readmitted.
 
-## Decisions
+## 2. Prediction moment and feature policy
+The declared prediction moment is **hospital discharge**. Twenty predictors are used: age, comorbidity count, length of stay, prior admissions in 12 months, ED visits in 6 months, discharge medication count, BMI, five last-available lab/vital measurements, weekend-discharge flag, follow-up scheduled, hospital site, sex, insurance type, admission source, primary diagnosis group, and discharge disposition. `followup_visit_scheduled` is included under the explicit synthetic-data assumption that the arrangement is known by discharge. The five lab/vital fields are treated as last values available before discharge. Historical utilization counts use only events before the current admission.
 
-_To be completed._
+`admission_id` is an identifier, not a predictor. `patient_id` is retained for traceability and history construction but excluded as a direct predictor. `admit_date` and `discharge_date` are excluded as raw predictors. `post_discharge_call_logged` is excluded because the call may occur after the declared prediction moment. `readmitted_30d` is the training target only and is never a predictor. These exclusions prevent direct identifier memorization and post-outcome / post-discharge leakage.
+
+## 3. Synthetic data and audit
+No real patient data, external datasets, lookup tables, or pretrained models were used. The reproducible generator uses seed 42 and creates 60,000 labelled training admissions (2021–2023 admission dates) and 8,000 holdout admissions (Jan–Mar 2024 admission dates); the holdout has no target column. The generated training prevalence is 15.28%. The five specified lab/vital fields have approximately 4% missingness and are imputed within the model pipeline. About 30% of patients have multiple admissions; history counts are computed from prior events, and the audit found no overlapping stays or prior-history mismatches.
+
+The audit found the observed prior-admission-count distribution differs from its initial marginal design target: 0 prior admissions 60.83%, 1 19.02%, 2 7.08%, and 3+ 13.06%. This was retained and documented rather than independently forcing the feature distribution, because the field is derived from generated patient histories and is constrained by the repeated-patient design. The observed LOS and discharge-disposition distributions were close to their design targets. The synthetic distributions and label mechanism are design assumptions, not claims about real clinical populations.
+
+## 4. Validation and model comparison
+A temporal split was used by admission date: training Jan 2021–Dec 2022; validation Jan–Jun 2023; internal test Jul–Dec 2023. The 2024 holdout was kept separate from model selection. Repeated patients can appear across temporal partitions; patient ID is excluded as a predictor, and prior utilization features are constructed using only earlier events. This approximates future-period deployment more closely than a random row split, although it is not a prospective clinical validation.
+
+Logistic Regression was the baseline. A tuned Random Forest was the alternative. On validation, Logistic Regression achieved Precision@5% 55.24%, Recall@5% 17.47%, PR-AUC 0.3989, ROC-AUC 0.7522, and Brier 0.1155. The selected Random Forest achieved 53.02%, 16.77%, 0.3752, 0.7422, and 0.1182 respectively. On the untouched internal test, Logistic Regression achieved Precision@5% 46.31%, Recall@5% 15.86%, PR-AUC 0.3412, ROC-AUC 0.7432, and Brier 0.1119; Random Forest achieved 45.72%, 15.66%, 0.3280, 0.7302, and 0.1133. Logistic Regression led on all reported metrics in both periods, so it was selected. Validation-to-test degradation is disclosed rather than hidden.
+
+## 5. Probability assessment and final scoring
+The selected Logistic Regression pipeline uses median imputation and standardization for numeric fields, most-frequent imputation and one-hot encoding for categorical fields, with preprocessing fitted inside the pipeline. Its internal-test Brier score was 0.1119. Calibration deciles were reasonably ordered but not perfectly aligned: for example, the lowest decile averaged 3.19% predicted versus 2.22% observed, while the highest averaged 42.88% predicted versus 40.47% observed. Scores are therefore useful for relative prioritization but should not be described as perfectly calibrated individual probabilities. No calibration method was fitted on internal-test labels.
+
+After model selection, the final Logistic Regression pipeline was refitted on all 60,000 labelled development admissions and used to score the 8,000-row holdout. The generated `predictions.csv` contains `admission_id` and `risk_score`, with scores between 0 and 1. The holdout target column was absent and no holdout labels were accessed. The score distribution in the generated file was min 0.0117, max 0.7700, mean 0.1254. This mean is a model-score summary, not a verified holdout event rate.
+
+## 6. Application, safeguards, and limitations
+The local FastAPI service loads the saved model and exposes health, single-score, batch-score, and ranked-call-list endpoints. The Streamlit interface calls only the backend, displays the ranked list capped at 5%, and presents per-admission scores with simple descriptive signals. Those signals are transparent rule-based cues, not faithful model attributions or causal explanations. Scores support prioritization and do not replace clinical judgment.
+
+The data are synthetic, so the results do not establish clinical validity, fairness, safety, or real-world effectiveness. Before any real use, the model would require source-system validation, clinical and compliance review, subgroup and calibration assessment, prospective silent-mode evaluation, workflow testing, and ongoing drift/performance monitoring. The prototype must not be deployed for patient care.
